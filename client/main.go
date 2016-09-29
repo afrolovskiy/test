@@ -7,69 +7,68 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 var addr = flag.String("addr", "localhost:8080", "http server address")
-var wsCount = flag.Int("ws", 1, "number of concurrent websocket connection")
-var load = flag.Int("load", 1, "number of concurrent requests per second")
+var wsRPS = flag.Int("ws", 1, "number of concurrent websocket connection")
+var sleepRPS = flag.Int("sleep", 1, "number of concurrent requests per second")
 
+// Websocket settings
 const writeWait = 10 * time.Second
 
-// rc is channel which is used for rps calculating.
-var rc chan struct{}
+var (
+	// Metrics
+	wsCount     int64  // Total number of websocket clients
+	reqSucCount uint64 // Total number of success request
+	reqErrCount uint64 // Total number of error requests
 
-// sleep sends HTTP-request to /sleep endpoint.
-func sleep(rid int) {
-	defer func() { rc <- struct{}{} }()
+	wsSem chan struct{}
+)
 
+func sleep() {
 	u := url.URL{Scheme: "http", Host: *addr, Path: "/sleep"}
-	log.Printf("#%d: sending request to url=%s", rid, u.String())
-
 	resp, err := http.Post(u.String(), "application/json", nil)
 	if err != nil {
-		log.Printf("#%d: failed to send request: %s", rid, err)
+		log.Printf("sleep: failed to send request: %s", err)
+		atomic.AddUint64(&reqErrCount, 1)
 		return
 	}
-	defer resp.Body.Close()
 
-	log.Printf("#%d: response code=%d", rid, resp.StatusCode)
+	defer resp.Body.Close()
+	atomic.AddUint64(&reqSucCount, 1)
 }
 
-// ws sets up websocket connection with server, sends message to server once a second.
-func ws(id int) {
-	u := url.URL{Scheme: "ws", Host: *addr, Path: "/ws"}
-	log.Printf("#%d: connected to ws url=%s", id, u.String())
+func listen() {
+	defer func() { <-wsSem }()
 
-	// Connect to the server
+	u := url.URL{Scheme: "ws", Host: *addr, Path: "/ws"}
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
-		log.Printf("#%d: failed to open websocket connection: %s", id, err)
+		log.Printf("ws: failed to open websocket connection: %s", err)
 		return
 	}
 	defer conn.Close()
 
-	done := make(chan struct{})
+	atomic.AddInt64(&wsCount, 1)
+	defer func() { atomic.AddInt64(&wsCount, -1) }()
 
+	done := make(chan struct{})
 	go func() {
 		defer conn.Close()
 		defer close(done)
 
-		// Print all message which were received from server
 		for {
-			messageType, message, err := conn.ReadMessage()
-			if err != nil {
-				log.Printf("#%d: failed to read message: %s", id, err)
+			if _, _, err := conn.ReadMessage(); err != nil {
+				log.Printf("ws: failed to read message: %s", err)
 				return
 			}
-			log.Printf("#%d: received message with type=%d: %s", id, messageType, message)
 		}
 	}()
 
-	// Send one message to server every second.
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -77,59 +76,50 @@ func ws(id int) {
 		case t := <-ticker.C:
 			err := conn.WriteMessage(websocket.TextMessage, []byte(t.String()))
 			if err != nil {
-				log.Printf("failed to write messsage: %s", err)
+				log.Printf("ws: failed to write messsage: %s", err)
 				return
 			}
 		}
 	}
 }
 
-// aggregate calculates RPS metric and prints it to the log.
-func aggregate() {
-	var m sync.Mutex
-	var count int
-
+func metrics() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	var oldReqSucCount uint64
+	var oldReqErrCount uint64
 	for {
 		select {
 		case <-ticker.C:
-			m.Lock()
-			rps := count
-			count = 0
-			m.Unlock()
-			log.Printf("rps=%d", rps)
-
-		case <-rc:
-			m.Lock()
-			count++
-			m.Unlock()
+			curReqSucCount := atomic.LoadUint64(&reqSucCount)
+			curReqErrCount := atomic.LoadUint64(&reqErrCount)
+			log.Printf("rps=%d errs=%d ws=%d", curReqSucCount-oldReqSucCount, curReqErrCount-oldReqErrCount, atomic.LoadInt64(&wsCount))
+			oldReqSucCount = curReqSucCount
+			oldReqErrCount = curReqErrCount
 		}
 	}
 }
 
 func main() {
 	flag.Parse()
+	go metrics()
 
-	rc = make(chan struct{}, 10000)
-	go aggregate()
+	wsSem = make(chan struct{}, *wsRPS)
+	go func() {
+		for {
+			wsSem <- struct{}{}
+			go listen()
+		}
+	}()
 
-	// Start concurrent websocket connections.
-	for i := 0; i < *wsCount; i++ {
-		go ws(i)
-	}
-
-	// Send batch of requests each second
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	var rid int
 	for {
 		select {
 		case <-ticker.C:
-			for i := 0; i < *load; i++ {
-				go sleep(rid)
-				rid++
+			for i := 0; i < *sleepRPS; i++ {
+				go sleep()
 			}
 		}
 	}

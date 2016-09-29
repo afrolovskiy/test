@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	// Websocket settings
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
@@ -24,8 +25,9 @@ var (
 		WriteBufferSize: 1024,
 		CheckOrigin:     func(r *http.Request) bool { return true },
 	}
-	reqCount uint64
-	wsCount  int64
+	// Metrics
+	reqCount uint64 // Total number of processed requests
+	wsCount  int64  // Total number of websocket clients
 )
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
