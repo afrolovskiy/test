@@ -94,7 +94,10 @@ func metrics() {
 		case <-ticker.C:
 			curReqSucCount := atomic.LoadUint64(&reqSucCount)
 			curReqErrCount := atomic.LoadUint64(&reqErrCount)
-			log.Printf("rps=%d errs=%d ws=%d", curReqSucCount-oldReqSucCount, curReqErrCount-oldReqErrCount, atomic.LoadInt64(&wsCount))
+			log.Printf("metrcis: rps=%d errs=%d ws=%d",
+				curReqSucCount-oldReqSucCount,
+				curReqErrCount-oldReqErrCount,
+				atomic.LoadInt64(&wsCount))
 			oldReqSucCount = curReqSucCount
 			oldReqErrCount = curReqErrCount
 		}
