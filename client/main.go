@@ -37,9 +37,12 @@ func sleep() {
 		atomic.AddUint64(&reqErrCount, 1)
 		return
 	}
-
 	defer resp.Body.Close()
-	atomic.AddUint64(&reqSucCount, 1)
+	if resp.StatusCode == http.StatusOK {
+		atomic.AddUint64(&reqSucCount, 1)
+	} else {
+		atomic.AddUint64(&reqErrCount, 1)
+	}
 }
 
 func listen() {
