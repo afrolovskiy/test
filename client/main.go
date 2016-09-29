@@ -14,8 +14,8 @@ import (
 )
 
 var addr = flag.String("addr", "localhost:8080", "http server address")
-var wsCount = flag.Int("ws", 1000, "number of concurrent websocket connection")
-var load = flag.Int("load", 1000, "number of concurrent requests per second")
+var wsCount = flag.Int("ws", 1, "number of concurrent websocket connection")
+var load = flag.Int("load", 1, "number of concurrent requests per second")
 
 const writeWait = 10 * time.Second
 
@@ -36,9 +36,7 @@ func sleep(rid int) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("#%d: invalid response code=%d", rid, resp.StatusCode)
-	}
+	log.Printf("#%d: response code=%d", rid, resp.StatusCode)
 }
 
 // ws sets up websocket connection with server, sends message to server once a second.
@@ -91,7 +89,7 @@ func aggregate() {
 	var m sync.Mutex
 	var count int
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -101,7 +99,7 @@ func aggregate() {
 			rps := count
 			count = 0
 			m.Unlock()
-			log.Printf("rps=%d", rps/10.0)
+			log.Printf("rps=%d", rps)
 
 		case <-rc:
 			m.Lock()
@@ -112,6 +110,8 @@ func aggregate() {
 }
 
 func main() {
+	flag.Parse()
+
 	rc = make(chan struct{}, 10000)
 	go aggregate()
 

@@ -73,13 +73,14 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "", http.StatusOK)
 			return
 		}
-		log.Printf("dreceived message with type=%d: %s", messageType, message)
+		log.Printf("ws received message with type=%d: %s", messageType, message)
 	}
 }
 
 func sleepHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("sleep request addr=%s", r.RemoteAddr)
 	time.Sleep(50 * time.Millisecond)
-	log.Printf("handled request %s", r.RemoteAddr)
+	w.WriteHeader(http.StatusOK)
 	rc <- struct{}{}
 }
 
@@ -87,7 +88,7 @@ func aggregate() {
 	var m sync.Mutex
 	var count int
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -97,7 +98,7 @@ func aggregate() {
 			rps := count
 			count = 0
 			m.Unlock()
-			log.Printf("rps=%d", rps/10.0)
+			log.Printf("rps=%d", rps)
 
 		case <-rc:
 			m.Lock()
@@ -108,10 +109,11 @@ func aggregate() {
 }
 
 func main() {
+	log.Printf("starting test-server")
+
 	rc = make(chan struct{}, 10000)
 	go aggregate()
 
-	log.Printf("server started")
 	http.HandleFunc("/sleep", sleepHandler)
 	http.HandleFunc("/ws", wsHandler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
