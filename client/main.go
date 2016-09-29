@@ -25,7 +25,7 @@ var (
 	wsCount     int64  // Total number of websocket clients
 	reqSucCount uint64 // Total number of success request
 	reqErrCount uint64 // Total number of error requests
-
+	// Semaphor for number of concurrent websockets
 	wsSem chan struct{}
 )
 
