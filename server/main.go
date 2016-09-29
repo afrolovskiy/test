@@ -5,7 +5,7 @@ package main
 import (
 	"log"
 	"net/http"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -18,13 +18,15 @@ const (
 	maxMessageSize = 512
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
-}
-
-var rc chan struct{}
+var (
+	upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     func(r *http.Request) bool { return true },
+	}
+	reqCount uint64
+	wsCount  int64
+)
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -32,23 +34,26 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("connected %s", r.RemoteAddr)
+	defer conn.Close()
+
+	log.Printf("%s ws: connected", r.RemoteAddr)
+	defer func() { log.Printf("%s ws: disconnected", r.RemoteAddr) }()
+
+	atomic.AddInt64(&wsCount, 1)
+	defer func() { atomic.AddInt64(&wsCount, -1) }()
 
 	done := make(chan struct{})
 	defer close(done)
-
 	go func() {
 		ticker := time.NewTicker(pingPeriod)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				log.Print("started to send ping")
 				if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(writeWait)); err != nil {
-					log.Printf("failed to send ping: %s", err)
+					log.Printf("%s ws: failed to send ping: %s", r.RemoteAddr, err)
 					return
 				}
-				log.Print("succesfully sended ping")
 			case <-done:
 				return
 			}
@@ -63,56 +68,41 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	for {
-		messageType, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("failed to read message: %s", err)
+		if _, _, err := conn.ReadMessage(); err != nil {
+			log.Printf("%s ws: failed to read message: %s", r.RemoteAddr, err)
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				http.Error(w, "", http.StatusInternalServerError)
 				return
 			}
-			http.Error(w, "", http.StatusOK)
-			return
 		}
-		log.Printf("ws received message with type=%d: %s", messageType, message)
 	}
 }
 
 func sleepHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("sleep request addr=%s", r.RemoteAddr)
+	atomic.AddUint64(&reqCount, 1)
+	log.Printf("%s sleep: handled request", r.RemoteAddr)
 	time.Sleep(50 * time.Millisecond)
 	w.WriteHeader(http.StatusOK)
-	rc <- struct{}{}
 }
 
-func aggregate() {
-	var m sync.Mutex
-	var count int
-
+func metrics() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	var oldReqCount uint64
 	for {
 		select {
 		case <-ticker.C:
-			m.Lock()
-			rps := count
-			count = 0
-			m.Unlock()
-			log.Printf("rps=%d", rps)
-
-		case <-rc:
-			m.Lock()
-			count++
-			m.Unlock()
+			curReqCount := atomic.LoadUint64(&reqCount)
+			log.Printf("metrics: rps=%d ws=%d", curReqCount-oldReqCount, atomic.LoadInt64(&wsCount))
+			oldReqCount = curReqCount
 		}
 	}
 }
 
 func main() {
 	log.Printf("starting test-server")
-
-	rc = make(chan struct{}, 10000)
-	go aggregate()
+	go metrics()
 
 	http.HandleFunc("/sleep", sleepHandler)
 	http.HandleFunc("/ws", wsHandler)
