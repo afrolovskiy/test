@@ -80,6 +80,9 @@ func listen() {
 				log.Printf("ws: failed to read message: %s", err)
 				return
 			}
+			if *verbose {
+				log.Printf("ws: received message")
+			}
 		}
 	}()
 
@@ -92,6 +95,9 @@ func listen() {
 			if err != nil {
 				log.Printf("ws: failed to write messsage: %s", err)
 				return
+			}
+			if *verbose {
+				log.Printf("ws: sent message")
 			}
 		}
 	}

@@ -62,6 +62,9 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 					log.Printf("%s ws: failed to send ping: %s", r.RemoteAddr, err)
 					return
 				}
+				if *verbose {
+					log.Printf("%s ws: sent ping message", r.RemoteAddr)
+				}
 			case <-done:
 				return
 			}
@@ -82,6 +85,9 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "", http.StatusInternalServerError)
 				return
 			}
+		}
+		if *verbose {
+			log.Printf("%s ws: received message", r.RemoteAddr)
 		}
 	}
 }
