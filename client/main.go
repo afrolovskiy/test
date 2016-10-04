@@ -18,6 +18,7 @@ var wsRPS = flag.Int("ws", 1, "number of concurrent websocket connection")
 var sleepRPS = flag.Int("sleep", 1, "number of concurrent requests per second")
 var verbose = flag.Bool("verbose", false, "show more debug info")
 var showMetrics = flag.Bool("show-metrics", false, "show metrics")
+var sendWsMessage = flag.Bool("ws-test-message", false, "send test messages to websocket")
 
 // Websocket settings
 const writeWait = 10 * time.Second
@@ -70,35 +71,34 @@ func listen() {
 	atomic.AddInt64(&wsCount, 1)
 	defer func() { atomic.AddInt64(&wsCount, -1) }()
 
-	done := make(chan struct{})
-	go func() {
-		defer conn.Close()
-		defer close(done)
-
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				log.Printf("ws: failed to read message: %s", err)
-				return
+	if *sendWsMessage {
+		go func() {
+			defer conn.Close()
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case t := <-ticker.C:
+					err := conn.WriteMessage(websocket.TextMessage, []byte(t.String()))
+					if err != nil {
+						log.Printf("ws: failed to write messsage: %s", err)
+						return
+					}
+					if *verbose {
+						log.Printf("ws: sent message")
+					}
+				}
 			}
-			if *verbose {
-				log.Printf("ws: received message")
-			}
-		}
-	}()
+		}()
+	}
 
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
 	for {
-		select {
-		case t := <-ticker.C:
-			err := conn.WriteMessage(websocket.TextMessage, []byte(t.String()))
-			if err != nil {
-				log.Printf("ws: failed to write messsage: %s", err)
-				return
-			}
-			if *verbose {
-				log.Printf("ws: sent message")
-			}
+		if _, _, err := conn.ReadMessage(); err != nil {
+			log.Printf("ws: failed to read message: %s", err)
+			return
+		}
+		if *verbose {
+			log.Printf("ws: received message")
 		}
 	}
 }
