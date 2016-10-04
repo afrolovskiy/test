@@ -3,6 +3,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 	"sync/atomic"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+var verbose = flag.Bool("verbose", false, "show more debug info")
+var showMetrics = flag.Bool("show-metrics", false, "show metrics")
 
 const (
 	// Websocket settings
@@ -38,8 +42,10 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	log.Printf("%s ws: connected", r.RemoteAddr)
-	defer func() { log.Printf("%s ws: disconnected", r.RemoteAddr) }()
+	if *verbose {
+		log.Printf("%s ws: connected", r.RemoteAddr)
+		defer func() { log.Printf("%s ws: disconnected", r.RemoteAddr) }()
+	}
 
 	atomic.AddInt64(&wsCount, 1)
 	defer func() { atomic.AddInt64(&wsCount, -1) }()
@@ -82,7 +88,9 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 
 func sleepHandler(w http.ResponseWriter, r *http.Request) {
 	atomic.AddUint64(&reqCount, 1)
-	log.Printf("%s sleep: handled request", r.RemoteAddr)
+	if *verbose {
+		log.Printf("%s sleep: handled request", r.RemoteAddr)
+	}
 	time.Sleep(50 * time.Millisecond)
 	w.WriteHeader(http.StatusOK)
 }
@@ -96,15 +104,19 @@ func metrics() {
 		select {
 		case <-ticker.C:
 			curReqCount := atomic.LoadUint64(&reqCount)
-			log.Printf("metrics: rps=%d ws=%d", curReqCount-oldReqCount, atomic.LoadInt64(&wsCount))
+			if *showMetrics {
+				log.Printf("metrics: rps=%d ws=%d", curReqCount-oldReqCount, atomic.LoadInt64(&wsCount))
+			}
 			oldReqCount = curReqCount
 		}
 	}
 }
 
 func main() {
-	log.Printf("starting test-server")
+	flag.Parse()
 	go metrics()
+
+	log.Printf("starting test-server")
 
 	http.HandleFunc("/sleep", sleepHandler)
 	http.HandleFunc("/ws", wsHandler)

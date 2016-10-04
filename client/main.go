@@ -16,6 +16,8 @@ import (
 var addr = flag.String("addr", "localhost:8080", "http server address")
 var wsRPS = flag.Int("ws", 1, "number of concurrent websocket connection")
 var sleepRPS = flag.Int("sleep", 1, "number of concurrent requests per second")
+var verbose = flag.Bool("verbose", false, "show more debug info")
+var showMetrics = flag.Bool("show-metrics", false, "show metrics")
 
 // Websocket settings
 const writeWait = 10 * time.Second
@@ -38,6 +40,11 @@ func sleep() {
 		return
 	}
 	defer resp.Body.Close()
+
+	if *verbose {
+		log.Printf("sleep: sent request code=%d", resp.StatusCode)
+	}
+
 	if resp.StatusCode == http.StatusOK {
 		atomic.AddUint64(&reqSucCount, 1)
 	} else {
@@ -55,6 +62,10 @@ func listen() {
 		return
 	}
 	defer conn.Close()
+
+	if *verbose {
+		log.Printf("ws: connected to the server from add=%s", conn.LocalAddr())
+	}
 
 	atomic.AddInt64(&wsCount, 1)
 	defer func() { atomic.AddInt64(&wsCount, -1) }()
@@ -97,10 +108,12 @@ func metrics() {
 		case <-ticker.C:
 			curReqSucCount := atomic.LoadUint64(&reqSucCount)
 			curReqErrCount := atomic.LoadUint64(&reqErrCount)
-			log.Printf("metrics: rps=%d errs=%d ws=%d",
-				curReqSucCount-oldReqSucCount,
-				curReqErrCount-oldReqErrCount,
-				atomic.LoadInt64(&wsCount))
+			if *showMetrics {
+				log.Printf("metrics: rps=%d errs=%d ws=%d",
+					curReqSucCount-oldReqSucCount,
+					curReqErrCount-oldReqErrCount,
+					atomic.LoadInt64(&wsCount))
+			}
 			oldReqSucCount = curReqSucCount
 			oldReqErrCount = curReqErrCount
 		}
