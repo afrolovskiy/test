@@ -5,9 +5,13 @@ package main
 import (
 	"flag"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -28,7 +32,7 @@ var (
 	wsCount     int64  // Total number of websocket clients
 	reqSucCount uint64 // Total number of success request
 	reqErrCount uint64 // Total number of error requests
-	// Semaphor for number of concurrent websockets
+	// Semaphor to control the number of concurrent websockets
 	wsSem chan struct{}
 )
 
@@ -126,8 +130,27 @@ func metrics() {
 	}
 }
 
+func worker(id int) {
+	for {
+		// Send only 1 request per second:
+		// <time before request> <request execution time> <time after request> = 1s
+
+		// TODO: use crypto/rand
+		before := rand.Float64()
+		<-time.After(time.Duration(before*1000) * time.Millisecond)
+
+		start := time.Now()
+		sleep()
+		elapsed := time.Since(start)
+
+		after := 1 - elapsed.Seconds() - before
+		<-time.After(time.Duration(int(after*1000)) * time.Millisecond)
+	}
+}
+
 func main() {
 	flag.Parse()
+	rand.Seed(time.Now().Unix())
 	go metrics()
 
 	wsSem = make(chan struct{}, *wsRPS)
@@ -138,14 +161,11 @@ func main() {
 		}
 	}()
 
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			for i := 0; i < *sleepRPS; i++ {
-				go sleep()
-			}
-		}
+	for i := 0; i < *sleepRPS; i++ {
+		go worker(i)
 	}
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
 }
