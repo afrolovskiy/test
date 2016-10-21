@@ -26,3 +26,6 @@ vmstat 1 > ~/vmstat.10000ws.1000rps
 sar -n DEV 1 > ~/sar.dev.10000ws.1000rps
 sar -n EDEV 1 > ~/sar.edev.10000ws.1000rps
 dmesg (call at the end of script work)
+
+To load sysctl.conf you should call:
+sysctl -p
